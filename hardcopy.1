@@ -1,0 +1,47 @@
+s1
+*** Adding links:
+(h1, s1) (h2, s1) (h3, s1)
+*** Configuring hosts
+h1 h2 h3
+*** Starting controller
+*** Starting 1 switches
+s1
+*** ARPing from host h1
+*** Starting SimpleHTTPServer on host h1
+*** ARPing from host h2
+*** Starting SimpleHTTPServer on host h2
+*** ARPing from host h3
+*** Starting SimpleHTTPServer on host h3
+*** Starting CLI:
+mininet> exit
+*** Shutting down stale SimpleHTTPServers
+*** Shutting down stale webservers
+*** Stopping 1 switches
+s1 ...
+*** Stopping 3 hosts
+h1 h2 h3
+*** Stopping 1 controllers
+c0
+*** Done
+mininet@mininet-vm:~/assign5$ sudo ./run_mininet.py single,3
+*** Creating network
+*** Adding controller
+*** Adding hosts:
+h1 h2 h3
+*** Adding switches:
+s1
+*** Adding links:
+(h1, s1) (h2, s1) (h3, s1)
+*** Configuring hosts
+h1 h2 h3
+*** Starting controller
+*** Starting 1 switches
+s1
+*** ARPing from host h1
+*** Starting SimpleHTTPServer on host h1
+*** ARPing from host h2
+*** Starting SimpleHTTPServer on host h2
+*** ARPing from host h3
+*** Starting SimpleHTTPServer on host h3
+*** Starting CLI:
+mininet>
