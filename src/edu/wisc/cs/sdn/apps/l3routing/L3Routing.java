@@ -227,6 +227,8 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 
 	//recomputes every time
 	private void BellmanFord(){
+		table = (byte)0;
+
 		Collection<Host> hosts = getHosts();
 		Map<Long, IOFSwitch> switches = getSwitches();
     		Collection<Link> links = getLinks();
@@ -234,7 +236,7 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 		Map<IOFSwitch, Integer> weights = new HashMap<IOFSwitch, Integer>();
 		Map<IOFSwitch, Integer> ports = new HashMap<IOFSwitch, Integer>();
 
-		log.info(hosts.size()+" hosts bitch "+switches.size()+" switches and "+links.size()+" links you whore");
+		//log.info(hosts.size()+" hosts bitch "+switches.size()+" switches and "+links.size()+" links you whore");
 		
 		for(Host base : hosts){
 			//going one switch at a time
@@ -251,7 +253,7 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 				ports.put(currSwitch, new Integer(currSwitch.equals(first) ? base.getPort() : 0));
 			}
 
-			log.info("STEP TWO for host IP: "+base.getIPv4Address().intValue());
+			//log.info("STEP TWO for host IP: "+base.getIPv4Address().intValue());
 		
 			Iterator switchIter = switches.entrySet().iterator();
 			while(switchIter.hasNext()){	
@@ -259,7 +261,7 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 					if(weights.get(switches.get(link.getSrc())).intValue() + 1 < weights.get(switches.get(link.getDst())).intValue()){
 						weights.put(switches.get(link.getDst()), new Integer(1 + weights.get(switches.get(link.getSrc())).intValue()));
 						ports.put(switches.get(link.getDst()), link.getDstPort());//worried about this could be getSrcPort()
-						log.info("src port number:"+link.getSrcPort()+" dst port number:"+link.getDstPort());
+						//log.info("src port number:"+link.getSrcPort()+" dst port number:"+link.getDstPort());
 					}
 				}
 				switchIter.next();
@@ -273,8 +275,9 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 				//check if sw is the host's switch
 
 				OFMatch rule = new OFMatch();
+				rule.setDataLayerType((short)0x800);
 				rule.setNetworkDestination(OFMatch.ETH_TYPE_IPV4, base.getIPv4Address().intValue());
-				OFActionOutput action = new OFActionOutput(!sw.equals(base.getSwitch()) ? ports.get(sw).intValue() : base.getPort()e);
+				OFActionOutput action = new OFActionOutput(!sw.equals(base.getSwitch()) ? ports.get(sw).intValue() : base.getPort());
 
 				List<OFAction> actions = new ArrayList<OFAction>();
 				List<OFInstruction> instructions = new ArrayList<OFInstruction>();
@@ -286,24 +289,8 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 				SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, rule, instructions);
 
 			}
-			log.info("next host...");
+			//log.info("next host...");
 		}
-		
-		//maybe do it ^^^ up there since otherwise will have new weights and ports arrays
-		//next loop through switches and then hosts to assign rules to switches
-
-		/*OFMatch rule = new OFMatch();
-		rule.setNetworkDestination(short dataLayerType, int networkDestination);
-		OFActionOutput action = new OFActionOutput();
-		//new OFActionOutput(int portnum);
-		List<OFAction> actions = new ArrayList<OFAction>();
-		List<OFInstruction> instructions = new ArrayList<OFInstruction>();
-
-		actions.add(action);	
-		OFInstructionApplyActions instruct = new OFInstructionApplyActions(actions);
-		instructions.add(instruct);
-
-		//SwitchCommands.installRule(IOFSwitch sw, this.table, SwitchCommands.DEFAULT_PRIORITY, rule, instructions);*/
 
 
 	}
