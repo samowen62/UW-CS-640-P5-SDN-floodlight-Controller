@@ -5,15 +5,27 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.List;
 
 import org.openflow.protocol.OFMessage;
 import org.openflow.protocol.OFPacketIn;
 import org.openflow.protocol.OFType;
+import org.openflow.protocol.OFMatch;
+import org.openflow.protocol.OFOXMFieldType;
+import org.openflow.protocol.OFPort;
+import org.openflow.protocol.action.OFAction;
+import org.openflow.protocol.action.OFActionOutput;
+import org.openflow.protocol.action.OFActionSetField;
+import org.openflow.protocol.instruction.OFInstruction;
+import org.openflow.protocol.instruction.OFInstructionApplyActions;
+import org.openflow.protocol.instruction.OFInstructionGotoTable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import edu.wisc.cs.sdn.apps.util.ArpServer;
+import edu.wisc.cs.sdn.apps.util.SwitchCommands;
+import edu.wisc.cs.sdn.apps.l3routing.L3Routing;
 
 import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IFloodlightProviderService;
@@ -30,6 +42,9 @@ import net.floodlightcontroller.devicemanager.IDevice;
 import net.floodlightcontroller.devicemanager.IDeviceService;
 import net.floodlightcontroller.devicemanager.internal.DeviceManagerImpl;
 import net.floodlightcontroller.packet.Ethernet;
+import net.floodlightcontroller.packet.ARP;
+import net.floodlightcontroller.packet.TCP;
+import net.floodlightcontroller.packet.IPv4;
 import net.floodlightcontroller.util.MACAddress;
 
 public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
@@ -63,7 +78,7 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 	public void init(FloodlightModuleContext context)
 			throws FloodlightModuleException 
 	{
-		log.info(String.format("Initializing %s...", MODULE_NAME));
+		log.info(String.format("Initializing %s... ", MODULE_NAME));
 		
 		// Obtain table number from config
 		Map<String,String> config = context.getConfigParams(this);
@@ -113,6 +128,9 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		/*********************************************************************/
 	}
 	
+	private Map<Long, IOFSwitch> getSwitches()
+    { return floodlightProv.getAllSwitchMap(); }
+
 	/**
      * Event handler called when a switch joins the network.
      * @param DPID for the switch
@@ -121,8 +139,59 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 	public void switchAdded(long switchId) 
 	{
 		IOFSwitch sw = this.floodlightProv.getSwitch(switchId);
-		log.info(String.format("Switch s%d added", switchId));
+		log.info("SWITCH "+switchId+" ADDED");
 		
+		//Map<Long, IOFSwitch> switches = getSwitches();
+		OFMatch rule;
+		OFActionOutput action;
+		List<OFAction> actions;
+		List<OFInstruction> instructions;
+		OFInstructionApplyActions instruct;
+
+		Iterator it = instances.entrySet().iterator();
+		while(it.hasNext()){
+			Map.Entry entry = (Map.Entry)it.next();
+			LoadBalancerInstance inst = (LoadBalancerInstance)entry.getValue();
+				//log.info(inst.toString());
+
+			rule = new OFMatch();
+			rule.setDataLayerType((short)0x800);
+			rule.setNetworkDestination(OFMatch.ETH_TYPE_IPV4, inst.getVirtualIP());
+			action = new OFActionOutput(OFPort.OFPP_CONTROLLER);
+
+			actions = new ArrayList<OFAction>();
+			instructions = new ArrayList<OFInstruction>();
+
+			actions.add(action);	
+			instruct = new OFInstructionApplyActions(actions);
+			instructions.add(instruct);
+			log.info("RULE ADDED FOR "+inst.getVirtualIP());
+
+			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, rule, instructions);
+		}
+	
+
+		rule = new OFMatch();
+		rule.setDataLayerType(OFMatch.ETH_TYPE_ARP);
+		//rule.setNetworkDestination(OFMatch.ETH_TYPE_IPV4, inst.getVirtualIP());
+		action = new OFActionOutput(OFPort.OFPP_CONTROLLER);
+
+		actions = new ArrayList<OFAction>();
+		instructions = new ArrayList<OFInstruction>();
+
+		actions.add(action);	
+		instruct = new OFInstructionApplyActions(actions);
+		instructions.add(instruct);
+
+		SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, rule, instructions);
+
+
+		rule = new OFMatch();
+		OFInstructionGotoTable instruction = new OFInstructionGotoTable(L3Routing.table);
+		instructions = new ArrayList<OFInstruction>();
+		instructions.add(instruction);
+		SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, rule, instructions);
+
 		/*********************************************************************/
 		/* TODO: Install rules to send:                                      */
 		/*       (1) packets from new connections to each virtual load       */
@@ -154,6 +223,7 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		ethPkt.deserialize(pktIn.getPacketData(), 0,
 				pktIn.getPacketData().length);
 		
+
 		/*********************************************************************/
 		/* TODO: Send an ARP reply for ARP requests for virtual IPs; for TCP */
 		/*       SYNs sent to a virtual IP, select a host and install        */
@@ -162,6 +232,75 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		
 		/*********************************************************************/
 
+		if (ethPkt.getEtherType() == Ethernet.TYPE_ARP)
+		{ 
+			ARP arp = (ARP)ethPkt.getPayload();
+			if (arp.getOpCode() != ARP.OP_REQUEST 
+				|| arp.getProtocolType() != ARP.PROTO_TYPE_IP)
+			{ return Command.CONTINUE; }
+				
+			// See if we known about the device whose MAC address is being requested
+			int targetIP = IPv4.toIPv4Address(arp.getTargetProtocolAddress());
+			log.info(String.format("RECEIVED ARP request for %s from %s",
+					IPv4.fromIPv4Address(targetIP),
+					MACAddress.valueOf(arp.getSenderHardwareAddress()).toString()));
+
+			Iterator it = instances.entrySet().iterator();
+			if(!it.hasNext())
+			{ return Command.CONTINUE; }
+			
+			Map.Entry entry = (Map.Entry)it.next();
+			LoadBalancerInstance inst = (LoadBalancerInstance)entry.getValue();
+
+			log.info("Constructing reply....");
+
+
+			byte[] deviceMac = inst.getVirtualMAC();
+			arp.setOpCode(ARP.OP_REPLY);
+			arp.setTargetHardwareAddress(arp.getSenderHardwareAddress());
+			arp.setTargetProtocolAddress(arp.getSenderProtocolAddress());
+			arp.setSenderHardwareAddress(deviceMac);
+			arp.setSenderProtocolAddress(IPv4.toIPv4AddressBytes(targetIP));
+			ethPkt.setDestinationMACAddress(ethPkt.getSourceMACAddress());
+			ethPkt.setSourceMACAddress(deviceMac);
+
+			SwitchCommands.sendPacket(sw, (short)pktIn.getInPort(), ethPkt);
+
+			//return Command.STOP;
+		} else if(ethPkt.getEtherType() == Ethernet.TYPE_IPv4){
+			IPv4 ip = (IPv4)ethPkt.getPayload();
+			if (ip.getProtocol() != IPv4.PROTOCOL_TCP)
+			{ return Command.CONTINUE; }
+
+			//inst.getNextHostIP() will also use OFActionSetField to write rules on switches
+			//match on  Ethernet type, source IP address, destination IP address, protocol, TCP source port, and TCP destination port MAX PRIORITY
+
+			TCP tcp = (TCP)ip.getPayload();
+			if (tcp.getFlags() != TCP_FLAG_SYN)
+			{ return Command.CONTINUE; }
+
+			log.info("got this far");
+
+			OFMatch rule = new OFMatch();
+			rule.setTransportSource(tcp.getSourcePort());
+			rule.setTransportDestination(tcp.getDestinationPort());
+			rule.setNetworkSource(OFMatch.ETH_TYPE_IPV4, ip.getSourceAddress());
+			rule.setNetworkDestination(OFMatch.ETH_TYPE_IPV4, ip.getDestinationAddress());
+			rule.setDataLayerType(Ethernet.TYPE_IPv4);
+			rule.setNetworkProtocol(IPv4.PROTOCOL_TCP);
+			
+			LoadBalancerInstance instance = instances.get(ip.getDestinationAddress());
+			int thisIp = instance.getNextHostIP();
+			//getHostMACAddress(int hostIPAddress)
+
+			OFActionSetField macAction = new OFActionSetField(OFOXMFieldType.ETH_DST, getHostMACAddress(thisIp));
+			//OFActionSetField ipAction = new OFActionSetField(OFOXMFieldType.IPV4_DST, 
+			List<OFAction> actions = new ArrayList<OFAction>();
+			actions.add(macAction);
+
+			List<OFInstruction> instructions;
+			OFInstructionApplyActions instruct;
+		}
 		
 		// We don't care about other packets
 		return Command.CONTINUE;

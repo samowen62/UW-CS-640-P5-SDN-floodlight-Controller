@@ -16,7 +16,6 @@ import org.openflow.protocol.action.OFAction;
 import org.openflow.protocol.action.OFActionOutput;
 import org.openflow.protocol.instruction.OFInstruction;
 import org.openflow.protocol.instruction.OFInstructionApplyActions;
-//import org.openflow.protocol.OFOXMFieldType;//look in this file for possible types
 
 import edu.wisc.cs.sdn.apps.util.Host;
 import edu.wisc.cs.sdn.apps.util.SwitchCommands;
