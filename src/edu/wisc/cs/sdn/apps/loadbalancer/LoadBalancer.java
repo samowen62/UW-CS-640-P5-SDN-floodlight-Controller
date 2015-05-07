@@ -165,7 +165,7 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			actions.add(action);	
 			instruct = new OFInstructionApplyActions(actions);
 			instructions.add(instruct);
-			log.info("RULE ADDED FOR "+inst.getVirtualIP());
+			//log.info("RULE ADDED FOR "+inst.getVirtualIP());
 
 			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, rule, instructions);
 		}
@@ -187,7 +187,9 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 
 
 		rule = new OFMatch();
+		rule.setDataLayerType((short)0x800);
 		OFInstructionGotoTable instruction = new OFInstructionGotoTable(L3Routing.table);
+
 		instructions = new ArrayList<OFInstruction>();
 		instructions.add(instruction);
 		SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, rule, instructions);
@@ -245,13 +247,14 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 					IPv4.fromIPv4Address(targetIP),
 					MACAddress.valueOf(arp.getSenderHardwareAddress()).toString()));
 
-			Iterator it = instances.entrySet().iterator();
-			if(!it.hasNext())
-			{ return Command.CONTINUE; }
+			//Iterator it = instances.entrySet().iterator();
+			//if(!it.hasNext())
+			//{ return Command.CONTINUE; }
 			
-			Map.Entry entry = (Map.Entry)it.next();
-			LoadBalancerInstance inst = (LoadBalancerInstance)entry.getValue();
+			//Map.Entry entry = (Map.Entry)it.next();
+			//LoadBalancerInstance inst = (LoadBalancerInstance)entry.getValue();
 
+			LoadBalancerInstance inst = instances.get(new Integer(targetIP));
 			log.info("Constructing reply....");
 
 
@@ -272,34 +275,64 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			if (ip.getProtocol() != IPv4.PROTOCOL_TCP)
 			{ return Command.CONTINUE; }
 
-			//inst.getNextHostIP() will also use OFActionSetField to write rules on switches
-			//match on  Ethernet type, source IP address, destination IP address, protocol, TCP source port, and TCP destination port MAX PRIORITY
 
 			TCP tcp = (TCP)ip.getPayload();
 			if (tcp.getFlags() != TCP_FLAG_SYN)
 			{ return Command.CONTINUE; }
 
-			log.info("got this far");
+
 
 			OFMatch rule = new OFMatch();
-			rule.setTransportSource(tcp.getSourcePort());
+			rule.setDataLayerType((short)0x800);
+			rule.setNetworkProtocol(IPv4.PROTOCOL_TCP);
+			rule.setTransportSource(tcp.getSourcePort());//check this
 			rule.setTransportDestination(tcp.getDestinationPort());
 			rule.setNetworkSource(OFMatch.ETH_TYPE_IPV4, ip.getSourceAddress());
 			rule.setNetworkDestination(OFMatch.ETH_TYPE_IPV4, ip.getDestinationAddress());
-			rule.setDataLayerType(Ethernet.TYPE_IPv4);
-			rule.setNetworkProtocol(IPv4.PROTOCOL_TCP);
-			
+			log.info("src "+ip.getSourceAddress()+" dst "+ip.getDestinationAddress());
+		
 			LoadBalancerInstance instance = instances.get(ip.getDestinationAddress());
 			int thisIp = instance.getNextHostIP();
-			//getHostMACAddress(int hostIPAddress)
 
 			OFActionSetField macAction = new OFActionSetField(OFOXMFieldType.ETH_DST, getHostMACAddress(thisIp));
-			//OFActionSetField ipAction = new OFActionSetField(OFOXMFieldType.IPV4_DST, 
+			OFActionSetField ipAction = new OFActionSetField(OFOXMFieldType.IPV4_DST,thisIp);
+
+			log.info("Mac: "+macAction+"\nIP: "+ipAction+"\nOn Rule"+rule+"\nTCP port: "+tcp.getSourcePort());//this is good too cept mabs tcp port
 			List<OFAction> actions = new ArrayList<OFAction>();
 			actions.add(macAction);
+			actions.add(ipAction);
 
-			List<OFInstruction> instructions;
-			OFInstructionApplyActions instruct;
+			List<OFInstruction> instructions = new ArrayList<OFInstruction>();
+			OFInstructionApplyActions instruct = new OFInstructionApplyActions(actions);
+			instructions.add(instruct);
+		
+			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, rule, instructions);
+
+
+			OFMatch incoming = new OFMatch();
+			incoming.setDataLayerType((short)0x800);
+			incoming.setNetworkProtocol(IPv4.PROTOCOL_TCP);
+			//incoming.setTransportSource(tcp.getDestinationPort());
+			//incoming.setTransportDestination(tcp.getSourcePort());
+			incoming.setNetworkSource(OFMatch.ETH_TYPE_IPV4, thisIp);
+			incoming.setNetworkDestination(OFMatch.ETH_TYPE_IPV4, ip.getSourceAddress());
+			log.info("IP of dest: "+ ip.getDestinationAddress() + "Match on: "+thisIp+"and "+instance.getVirtualMAC()+ " tha ip "+instance.getVirtualIP());
+
+			//LoadBalancerInstance inst = instances.get(new Integer(ip.getDestinationAddress()));			
+			OFActionSetField macSet = new OFActionSetField(OFOXMFieldType.ETH_SRC, instance.getVirtualMAC());
+			OFActionSetField ipSet = new OFActionSetField(OFOXMFieldType.IPV4_SRC,instance.getVirtualIP());
+
+			actions = new ArrayList<OFAction>();
+			actions.add(macSet);
+			actions.add(ipSet);
+
+			instructions = new ArrayList<OFInstruction>();
+			instruct = new OFInstructionApplyActions(actions);
+			instructions.add(instruct);
+		
+			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, incoming, instructions);
+			
+			log.info("Set the rules");		
 		}
 		
 		// We don't care about other packets

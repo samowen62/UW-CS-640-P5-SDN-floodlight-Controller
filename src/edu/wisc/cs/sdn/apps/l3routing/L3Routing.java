@@ -226,7 +226,7 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 
 	//recomputes every time
 	private void BellmanFord(){
-		table = (byte)0;
+	//	table = (byte)0;
 
 		Collection<Host> hosts = getHosts();
 		Map<Long, IOFSwitch> switches = getSwitches();
