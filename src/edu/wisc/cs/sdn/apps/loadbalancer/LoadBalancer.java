@@ -247,12 +247,6 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 					IPv4.fromIPv4Address(targetIP),
 					MACAddress.valueOf(arp.getSenderHardwareAddress()).toString()));
 
-			//Iterator it = instances.entrySet().iterator();
-			//if(!it.hasNext())
-			//{ return Command.CONTINUE; }
-			
-			//Map.Entry entry = (Map.Entry)it.next();
-			//LoadBalancerInstance inst = (LoadBalancerInstance)entry.getValue();
 
 			LoadBalancerInstance inst = instances.get(new Integer(targetIP));
 			log.info("Constructing reply....");
@@ -266,7 +260,7 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			arp.setSenderProtocolAddress(IPv4.toIPv4AddressBytes(targetIP));
 			ethPkt.setDestinationMACAddress(ethPkt.getSourceMACAddress());
 			ethPkt.setSourceMACAddress(deviceMac);
-
+			//log.info(arp.toString());
 			SwitchCommands.sendPacket(sw, (short)pktIn.getInPort(), ethPkt);
 
 			//return Command.STOP;
@@ -289,7 +283,6 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			rule.setTransportDestination(tcp.getDestinationPort());
 			rule.setNetworkSource(OFMatch.ETH_TYPE_IPV4, ip.getSourceAddress());
 			rule.setNetworkDestination(OFMatch.ETH_TYPE_IPV4, ip.getDestinationAddress());
-			log.info("src "+ip.getSourceAddress()+" dst "+ip.getDestinationAddress());
 		
 			LoadBalancerInstance instance = instances.get(ip.getDestinationAddress());
 			int thisIp = instance.getNextHostIP();
@@ -297,23 +290,28 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			OFActionSetField macAction = new OFActionSetField(OFOXMFieldType.ETH_DST, getHostMACAddress(thisIp));
 			OFActionSetField ipAction = new OFActionSetField(OFOXMFieldType.IPV4_DST,thisIp);
 
-			log.info("Mac: "+macAction+"\nIP: "+ipAction+"\nOn Rule"+rule+"\nTCP port: "+tcp.getSourcePort());//this is good too cept mabs tcp port
+			//log.info("Mac: "+macAction+"\nIP: "+ipAction+"\nOn Rule"+rule+"\nTCP port: "+tcp.getSourcePort());//this is good too cept mabs tcp port
 			List<OFAction> actions = new ArrayList<OFAction>();
 			actions.add(macAction);
 			actions.add(ipAction);
+		
 
 			List<OFInstruction> instructions = new ArrayList<OFInstruction>();
 			OFInstructionApplyActions instruct = new OFInstructionApplyActions(actions);
+			OFInstructionGotoTable instruction = new OFInstructionGotoTable(L3Routing.table);
 			instructions.add(instruct);
+			instructions.add(instruction);
 		
-			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, rule, instructions);
+			SwitchCommands.installRule(sw, table, SwitchCommands.MAX_PRIORITY, rule, instructions, (short)20, (short)20);
+			
 
+//CHANGE SOURCE
 
 			OFMatch incoming = new OFMatch();
 			incoming.setDataLayerType((short)0x800);
 			incoming.setNetworkProtocol(IPv4.PROTOCOL_TCP);
-			//incoming.setTransportSource(tcp.getDestinationPort());
-			//incoming.setTransportDestination(tcp.getSourcePort());
+			incoming.setTransportSource(tcp.getDestinationPort());
+			incoming.setTransportDestination(tcp.getSourcePort());
 			incoming.setNetworkSource(OFMatch.ETH_TYPE_IPV4, thisIp);
 			incoming.setNetworkDestination(OFMatch.ETH_TYPE_IPV4, ip.getSourceAddress());
 			log.info("IP of dest: "+ ip.getDestinationAddress() + "Match on: "+thisIp+"and "+instance.getVirtualMAC()+ " tha ip "+instance.getVirtualIP());
@@ -322,17 +320,21 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			OFActionSetField macSet = new OFActionSetField(OFOXMFieldType.ETH_SRC, instance.getVirtualMAC());
 			OFActionSetField ipSet = new OFActionSetField(OFOXMFieldType.IPV4_SRC,instance.getVirtualIP());
 
-			actions = new ArrayList<OFAction>();
-			actions.add(macSet);
-			actions.add(ipSet);
+			List<OFAction> actionsS = new ArrayList<OFAction>();
+			actionsS.add(macSet);
+			actionsS.add(ipSet);
 
-			instructions = new ArrayList<OFInstruction>();
-			instruct = new OFInstructionApplyActions(actions);
-			instructions.add(instruct);
+			List<OFInstruction> instructionsS = new ArrayList<OFInstruction>();
+			instruction = new OFInstructionGotoTable(L3Routing.table);
+			OFInstructionApplyActions instructS = new OFInstructionApplyActions(actionsS);
+			instructionsS.add(instructS);
+			instructionsS.add(instruction);
 		
-			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, incoming, instructions);
+			SwitchCommands.installRule(sw, table, SwitchCommands.MAX_PRIORITY, incoming, instructionsS, (short)20, (short)20);
 			
 			log.info("Set the rules");		
+	
+
 		}
 		
 		// We don't care about other packets
